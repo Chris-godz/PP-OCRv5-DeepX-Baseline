@@ -7,8 +7,12 @@ DXNN OCR is an OCR (Optical Character Recognition) GUI application based on DX R
 ## 🚀 Installation and Environment Setup
 
 ### Prerequisites
+
+For a simple installation, you can just run the `ocr_install.sh` script.
+
+Alternatively, you can manually set up the environment as follows:
 ```bash
-# Python 3.8 or higher
+# Python 3.11 or higher
 python --version
 
 # Install required packages
