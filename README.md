@@ -2,7 +2,7 @@
 
 ## 📋 Project Overview
 
-DXNN OCR is an OCR (Optical Character Recognition) GUI application based on DX Runtime. It provides an intuitive user interface using PySide6 and utilizes PaddleOCR models to extract text from images.
+DXNN OCR is an OCR (Optical Character Recognition) GUI application based on DX Runtime. It provides an intuitive user interface using PySide6 and utilizes [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) models to extract text from images.
 
 ## 🚀 Installation and Environment Setup
 
@@ -68,7 +68,7 @@ python demo.py --version v5
 DXNNOCR/
 ├── demo.py                 # Main GUI application
 ├── engine/
-│   ├── paddleocr.py       # PaddleOCR engine implementation
+│   ├── paddleocr.py       # PaddleOCR engine implementation (based on https://github.com/PaddlePaddle/PaddleOCR)
 │   ├── draw_utils.py      # Image drawing utilities
 │   └── model_files/       # DXNN model files
 ├── dx_engine.py           # Inference engine (external library)
