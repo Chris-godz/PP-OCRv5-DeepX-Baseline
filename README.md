@@ -1,84 +1,92 @@
-# DXNN OCR - OCR GUI Application
+# PP-OCRv5 DEEEPX Benchmark
 
-## 📋 Project Overview
+[中文 README](README_CN.md)
 
-DXNN OCR is an OCR (Optical Character Recognition) GUI application based on DX Runtime. It provides an intuitive user interface using PySide6 and utilizes [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) models to extract text from images.
+🚀 PP-OCRv5 benchmarking toolchain with DEEPX NPU acceleration and comprehensive performance evaluation.
 
-## 🚀 Installation and Environment Setup
+## 📈 Performance Results
 
-### Prerequisites
+### XFUND Dataset Overview
 
-For a simple installation, you can just run the `ocr_install.sh` script.
+This project uses the [XFUND](https://github.com/doc-analysis/XFUND) dataset for benchmarking. XFUND (eXtended FUnctional Needs Dataset) is a large-scale multilingual form understanding dataset released by Microsoft, containing form images and structured annotations in 7 languages (Chinese, English, Japanese, Spanish, French, Italian, German).
 
-Alternatively, you can manually set up the environment as follows:
+**Test Configuration**:
+- Dataset: XFUND Chinese validation set (50 images)
+- Model: DXNN-OCR v5 full pipeline (based on PP-OCRv5, DEEPX NPU accelerated)
+  - Text detection: PP-OCRv5 det → DXNN det_v5 (NPU optimized)
+  - Text classification: PP-OCRv5 cls → DXNN cls_v5 (NPU optimized)
+  - Text recognition: PP-OCRv5 rec → DXNN rec_v5 multi-ratio models (NPU optimized)
+- Hardware configuration:
+  - Platform: Rockchip RK3588 IR88MX01 LP4X V10
+  - NPU: DEEPX DX-M1 Accelerator Card
+    - PCIe: Gen3 X4 interface [01:00:00]
+    - Firmware: v2.1.0
+  - CPU: ARM Cortex-A55 8-core @ 2.35GHz (8nm process)
+  - System Memory: 8GB LPDDR4X
+  - Operating System: Ubuntu 20.04.6 LTS (Focal)
+  - Runtime: DXRT v2.9.5 + RT driver v1.7.1 + PCIe driver v1.4.1
+
+**Benchmark Results**:
+| Hardware | Average Inference Time (ms) | Average FPS | Average CPS (chars/s) | Average Accuracy (%) | 
+|---|---|---|---|---|
+| `DEEPX NPU` | 1767.31 | 0.64 | 250.57 | 46.41 |
+
+For detailed test results, see: [PP-OCRv5_on_DEEEPX.md](PP-OCRv5_on_DEEEPX.md)
+
+## 🛠️ Quick Start
+
+### ⚡ One Simple Step to Start Your OCR Benchmark
+
+**One-Step Execution:**
 ```bash
-# Python 3.11 or higher
-python --version
-
-# Install required packages
-pip install -r requirements.txt
+git clone https://github.com/DEEPX-AI/DXNN-OCR.git
+cd DXNN-OCR
+./startup.sh
 ```
 
-### Model File Preparation
-```
-engine/model_files/
-├── v4/
-│   ├── det.dxnn
-│   ├── cls.dxnn
-│   └── rec_ratio_*.dxnn
-└── v5/
-    ├── det_v5.dxnn
-    ├── cls_v5.dxnn
-    └── rec_v5_ratio_*.dxnn
-```
-
-## 🔧 Usage
-
-### Execution Method
-```bash
-# Run with v4 model
-python demo.py --version v4
-
-# Run with v5 model
-python demo.py --version v5
-```
-
-### How to Use
-
-1. **Image Upload**
-   - Click "Upload Images" button or drag and drop files directly
-   - Supported formats: PNG, JPG, JPEG, BMP, GIF
-
-2. **Single Image OCR**
-   - Click image in thumbnail list
-   - Automatic OCR execution and result display
-
-3. **Batch OCR Execution**
-   - Click "Run All Inference" button
-   - Sequential OCR execution for all uploaded images
-
-4. **Result Verification**
-   - **Left Panel**: Inferred text results and processed image preview
-   - **Center Panel**: Main image viewer with processing results
-   - **Right Panel**: Performance information and file management
-
-## 🏗️ Project Structure
+## 📁 Project Structure
 
 ```
-DXNNOCR/
-├── demo.py                 # Main GUI application
+├── startup.sh              # One-click benchmark execution
+├── scripts/
+│   ├── dxnn_benchmark.py   # Main benchmark tool (NPU inference + performance testing)
+│   ├── calculate_acc.py    # PP-OCRv5 compatible accuracy calculation
+│   └── ocr_engine.py       # DXNN NPU engine interface
 ├── engine/
-│   ├── paddleocr.py       # PaddleOCR engine implementation (based on https://github.com/PaddlePaddle/PaddleOCR)
-│   ├── draw_utils.py      # Image drawing utilities
-│   └── model_files/       # DXNN model files
-├── dx_engine.py           # Inference engine (external library)
-└── README.md             # Project documentation
+│   ├── model_files/v5/     # DXNN v5 NPU models
+│   ├── draw_utils.py       # Visualization utilities
+│   ├── utils.py           # Processing utilities
+│   └── fonts/             # Chinese fonts (for visualization)
+├── images/xfund/          # XFUND dataset (auto-downloaded)
+├── output/                # PP-OCRv5 compatible results
+│   ├── json/              # Detailed JSON results
+│   ├── vis/               # Visualization images
+│   ├── benchmark_summary.json
+│   ├── benchmark_results.csv
+│   └── DXNN-OCR_benchmark_report.md
+└── logs/                  # Execution logs
+```
+
+**Custom Dataset:**
+```bash
+# Prepare your own images
+mkdir -p images/custom
+cp /path/to/your/images/* images/custom/
+
+# Run benchmark
+python scripts/dxnn_benchmark.py \
+    --directory images/custom \
+    --output output_custom \
+    --runs 3
 ```
 
 ## 📄 License
 
-This project is distributed under the MIT License.
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
 
-## 📞 Contact
+## 🙏 Acknowledgments
 
-For project inquiries or bug reports, please submit through issues. 
+This project is forked and developed based on [DEEPX-AI/DXNN-OCR](https://github.com/DEEPX-AI/DXNN-OCR) project
+- Thanks to [DEEPX team](https://deepx.ai) for NPU runtime and foundational framework support
+- Thanks to the [PaddleOCR team](https://github.com/PaddlePaddle/PaddleOCR) for the excellent OCR framework
+- Thanks to [XFUND dataset](https://github.com/doc-analysis/XFUND) for providing standardized evaluation data 
