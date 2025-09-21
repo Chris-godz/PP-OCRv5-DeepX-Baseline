@@ -140,16 +140,6 @@ else
     exit 1
 fi
 
-# Verify key packages are installed
-REQUIRED_PACKAGES=("paddleocr" "opencv-python" "numpy" "Pillow")
-log "Verifying required packages..."
-for pkg in "${REQUIRED_PACKAGES[@]}"; do
-    if python -c "import ${pkg//-/_}" 2>/dev/null; then
-        log "✓ Package verified: $pkg"
-    else
-        log "⚠ Warning: Package not found or not importable: $pkg"
-    fi
-done
 
 # =============================================================================
 # Dataset Setup (following PP-OCRv5 methodology)
@@ -240,6 +230,8 @@ run_benchmark() {
     benchmark_cmd+=" --output output"
     benchmark_cmd+=" --runs 3"
     benchmark_cmd+=" --save-individual"
+    benchmark_cmd+=" --position-aware"
+    benchmark_cmd+=" --iou-threshold 0.5"
     
     log "Benchmark command: $benchmark_cmd"
     
@@ -312,5 +304,5 @@ echo "Log files: $LOG_DIR/"
 echo ""
 echo "To re-run benchmark only:"
 echo "  conda activate $ENV_NAME"
-echo "  python -u scripts/dxnn_benchmark.py --dataset_path images/xfund --ground_truth images/xfund/zh.val.json"
+echo "  python -u scripts/dxnn_benchmark.py --directory images/xfund --ground-truth images/xfund/zh.val.json --output output --position-aware --iou-threshold 0.5"
 echo ""

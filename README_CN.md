@@ -27,11 +27,17 @@
   - 运行时：DXRT v2.9.5 + RT驱动 v1.7.1 + PCIe驱动 v1.4.1
 
 **基准测试结果**:
-| 硬件 | 平均推理时间 (ms) | 平均 FPS | 平均 CPS (字符/秒) | 平均准确率 (%) | 
-|---|---|---|---|---|
-| `DEEPX NPU` | 1767.31 | 0.64 | 250.57 | 46.41 |
+| 硬件 | 平均推理时间 (ms) | 平均 FPS | 平均 CPS (字符/秒) | 平均准确率 (%) | 平均精确度 (%) |
+|---|---|---|---|---|---|
+| `DEEPX NPU` | 1821.12 | 0.62 | 242.98 | 44.84 | 50.76 |
 
-详细的测试结果请参考：[PP-OCRv5_on_DEEEPX.md](PP-OCRv5_on_DEEEPX.md)
+**关键指标说明**:
+- **准确率 (ACC)**: 使用 PaddleOCR RecMetric 的字符级准确率（标准化编辑距离相似度）
+- **精确度 (Precision)**: 基于 IoU 空间匹配的位置感知检测精确度（IoU 阈值: 0.5）
+- **CPS**: 字符处理吞吐量（每秒字符数）
+- **FPS**: 图像处理帧率（每秒帧数）
+
+**详细结果**: 包含所有 50 张 XFUND 测试图像准确率和精确度指标的完整单图性能分析，详见 [PP-OCRv5_on_DEEEPX.md](PP-OCRv5_on_DEEEPX.md)
 
 ## 🛠️ 快速开始
 
@@ -49,16 +55,20 @@ cd DXNN-OCR
 ```
 ├── startup.sh              # 一键基准测试执行
 ├── scripts/
-│   ├── dxnn_benchmark.py   # 主要基准测试工具（NPU 推理 + 性能测试）
-│   ├── calculate_acc.py    # PP-OCRv5 兼容精度计算
+│   ├── dxnn_benchmark.py   # 主要基准测试工具（NPU 推理 + PaddleOCR 指标）
+│   ├── calculate_acc.py    # PaddleOCR 标准准确率计算（RecMetric + DetectionIoUEvaluator）
 │   └── ocr_engine.py       # DXNN NPU 引擎接口
 ├── engine/
 │   ├── model_files/v5/     # DXNN v5 NPU 模型
 │   ├── draw_utils.py       # 可视化工具
 │   ├── utils.py           # 处理工具
 │   └── fonts/             # 中文字体（用于可视化）
+├── paddleocr_metrics/      # PaddleOCR 官方评估模块
+│   ├── rec_metric.py       # 文本识别准确率（RecMetric 配合 rapidfuzz）
+│   ├── det_metric.py       # 检测评估指标
+│   └── eval_det_iou.py     # 基于 IoU 的检测评估器（DetectionIoUEvaluator）
 ├── images/xfund/          # XFUND 数据集（自动下载）
-├── output/                # PP-OCRv5 兼容结果
+├── output/                # PaddleOCR 兼容结果
 │   ├── json/              # 详细 JSON 结果
 │   ├── vis/               # 可视化图像
 │   ├── benchmark_summary.json
@@ -73,10 +83,13 @@ cd DXNN-OCR
 mkdir -p images/custom
 cp /path/to/your/images/* images/custom/
 
-# 运行基准测试
+# 运行带位置感知精确度评估的基准测试
 python scripts/dxnn_benchmark.py \
     --directory images/custom \
+    --ground-truth path/to/ground_truth.json \
     --output output_custom \
+    --position-aware \
+    --iou-threshold 0.5 \
     --runs 3
 ```
 

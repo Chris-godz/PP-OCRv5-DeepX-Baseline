@@ -323,7 +323,12 @@ def save_to_img_custom_with_poly(image, bbox_text_poly_triplets, save_path, font
         save_path = save_path / "ocr_result.jpg"
     
     save_path.parent.mkdir(parents=True, exist_ok=True)
-    img_show.save(save_path)
+    
+    # Save with high quality settings
+    if str(save_path).lower().endswith(('.jpg', '.jpeg')):
+        img_show.save(save_path, quality=95, optimize=True, dpi=(300, 300))
+    else:
+        img_show.save(save_path, optimize=True, dpi=(300, 300))
     
     return img_show
 
@@ -581,12 +586,14 @@ def draw_ocr(
         box = np.reshape(np.array(boxes[i]), [-1, 1, 2]).astype(np.int64)
         image = cv2.polylines(np.array(image), [box], True, (255, 255, 0), 2)
     if txts is not None:
-        img = np.array(resize_img(image, input_size=600))
+        # Keep original resolution instead of resizing to 600px
+        img = np.array(image)
+        original_height, original_width = img.shape[:2]
         txt_img = text_visual(
             txts,
             scores,
-            img_h=img.shape[0],
-            img_w=600,
+            img_h=original_height,
+            img_w=original_width,
             threshold=drop_score,
             font_path=font_path,
         )

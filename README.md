@@ -27,11 +27,17 @@ This project uses the [XFUND](https://github.com/doc-analysis/XFUND) dataset for
   - Runtime: DXRT v2.9.5 + RT driver v1.7.1 + PCIe driver v1.4.1
 
 **Benchmark Results**:
-| Hardware | Average Inference Time (ms) | Average FPS | Average CPS (chars/s) | Average Accuracy (%) | 
-|---|---|---|---|---|
-| `DEEPX NPU` | 1767.31 | 0.64 | 250.57 | 46.41 |
+| Hardware | Average Inference Time (ms) | Average FPS | Average CPS (chars/s) | Average Accuracy (%) | Average Precision (%) |
+|---|---|---|---|---|---|
+| `DEEPX NPU` | 1821.12 | 0.62 | 242.98 | 44.84 | 50.76 |
 
-For detailed test results, see: [PP-OCRv5_on_DEEEPX.md](PP-OCRv5_on_DEEEPX.md)
+**Key Metrics Explanation**:
+- **Accuracy (ACC)**: Character-level accuracy using PaddleOCR's RecMetric (normalized edit distance similarity)
+- **Precision**: Position-aware detection precision using IoU-based spatial matching (IoU threshold: 0.5)
+- **CPS**: Characters per second throughput
+- **FPS**: Frames (images) per second processing rate
+
+**Detailed Results**: Complete per-image performance analysis with accuracy and precision metrics for all 50 XFUND test images available in [PP-OCRv5_on_DEEEPX.md](PP-OCRv5_on_DEEEPX.md)
 
 ## 🛠️ Quick Start
 
@@ -49,16 +55,20 @@ cd DXNN-OCR
 ```
 ├── startup.sh              # One-click benchmark execution
 ├── scripts/
-│   ├── dxnn_benchmark.py   # Main benchmark tool (NPU inference + performance testing)
-│   ├── calculate_acc.py    # PP-OCRv5 compatible accuracy calculation
+│   ├── dxnn_benchmark.py   # Main benchmark tool (NPU inference + PaddleOCR metrics)
+│   ├── calculate_acc.py    # PaddleOCR standard accuracy calculation (RecMetric + DetectionIoUEvaluator)
 │   └── ocr_engine.py       # DXNN NPU engine interface
 ├── engine/
 │   ├── model_files/v5/     # DXNN v5 NPU models
 │   ├── draw_utils.py       # Visualization utilities
 │   ├── utils.py           # Processing utilities
 │   └── fonts/             # Chinese fonts (for visualization)
+├── paddleocr_metrics/      # PaddleOCR official evaluation modules
+│   ├── rec_metric.py       # Text recognition accuracy (RecMetric with rapidfuzz)
+│   ├── det_metric.py       # Detection evaluation metrics
+│   └── eval_det_iou.py     # IoU-based detection evaluator (DetectionIoUEvaluator)
 ├── images/xfund/          # XFUND dataset (auto-downloaded)
-├── output/                # PP-OCRv5 compatible results
+├── output/                # PaddleOCR compatible results
 │   ├── json/              # Detailed JSON results
 │   ├── vis/               # Visualization images
 │   ├── benchmark_summary.json
@@ -73,10 +83,13 @@ cd DXNN-OCR
 mkdir -p images/custom
 cp /path/to/your/images/* images/custom/
 
-# Run benchmark
+# Run benchmark with position-aware precision evaluation
 python scripts/dxnn_benchmark.py \
     --directory images/custom \
+    --ground-truth path/to/ground_truth.json \
     --output output_custom \
+    --position-aware \
+    --iou-threshold 0.5 \
     --runs 3
 ```
 

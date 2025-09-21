@@ -16,19 +16,18 @@ import argparse
 import statistics
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional
-import unicodedata
 
 # Add the parent directory to Python path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from scripts.ocr_engine import create_ocr_workers
-from scripts.calculate_acc import calculate_accuracy_for_dxnn_benchmark
+from scripts.calculate_acc import calculate_integrated_accuracy_for_benchmark
 
 
 class OCRBenchmark:
     """DXNN OCR Benchmark Tool"""
     
-    def __init__(self, version='v5', workers=1, runs_per_image=3):
+    def __init__(self, version='v5', workers=1, runs_per_image=3, position_aware=False, iou_threshold=0.5):
         """
         Initialize benchmark tool
         
@@ -36,9 +35,15 @@ class OCRBenchmark:
             version: Model version (v5)
             workers: Number of worker threads
             runs_per_image: Number of inference runs per image for averaging
+            position_aware: Enable position-aware evaluation
+            iou_threshold: IoU threshold for position-aware evaluation
         """
         self.version = version
         self.runs_per_image = runs_per_image
+        self.position_aware = position_aware
+        self.iou_threshold = iou_threshold
+        self.ground_truth_file = None  # Will be set when running with ground truth
+        self.output_dir = None  # Will be set when saving results
         self.results = []
         
         print(f"[INIT] Initializing DXNN-OCR benchmark with version {version}...")
@@ -53,86 +58,6 @@ class OCRBenchmark:
         except Exception as e:
             print(f"✗ Failed to initialize OCR engine: {e}")
             sys.exit(1)
-    
-    def normalize_text_research_standard(self, text: str) -> str:
-        """
-        Normalize text for research-standard accuracy calculation
-        Following PP-OCRv5-Cpp-Baseline methodology
-        """
-        if not isinstance(text, str):
-            return ""
-
-        # Unicode normalization to handle combined characters
-        text = unicodedata.normalize('NFKC', text)
-        
-        # Lowercase the text
-        text = text.lower()
-        
-        # Remove punctuation and whitespace
-        punctuation_to_remove = "＂＃＄％＆＇（）＊＋，－．／：；＜＝＞？＠［＼］＾＿｀｛｜｝～" \
-                               "·｜「」『』《》〈〉（）" \
-                               ".,;:!?\"'()[]{}<>@#$%^&*-_=+|\\`~" \
-                               "●"
-        
-        whitespace_to_remove = " \t\n\r\f\v"
-        translator = str.maketrans('', '', punctuation_to_remove + whitespace_to_remove)
-        
-        return text.translate(translator)
-    
-    def calculate_character_accuracy(self, reference: str, hypothesis: str) -> Dict[str, float]:
-        """
-        Calculate character-level accuracy metrics
-        
-        Args:
-            reference: Ground truth text
-            hypothesis: OCR predicted text
-            
-        Returns:
-            Dictionary containing accuracy metrics
-        """
-        # Normalize both texts
-        ref_norm = self.normalize_text_research_standard(reference)
-        hyp_norm = self.normalize_text_research_standard(hypothesis)
-        
-        if len(ref_norm) == 0:
-            return {
-                'character_accuracy': 1.0 if len(hyp_norm) == 0 else 0.0,
-                'character_error_rate': 0.0 if len(hyp_norm) == 0 else 1.0,
-                'reference_length': 0,
-                'hypothesis_length': len(hyp_norm)
-            }
-        
-        # Calculate Levenshtein distance
-        def levenshtein_distance(s1, s2):
-            if len(s1) < len(s2):
-                return levenshtein_distance(s2, s1)
-            
-            if len(s2) == 0:
-                return len(s1)
-            
-            previous_row = list(range(len(s2) + 1))
-            for i, c1 in enumerate(s1):
-                current_row = [i + 1]
-                for j, c2 in enumerate(s2):
-                    insertions = previous_row[j + 1] + 1
-                    deletions = current_row[j] + 1
-                    substitutions = previous_row[j] + (c1 != c2)
-                    current_row.append(min(insertions, deletions, substitutions))
-                previous_row = current_row
-            
-            return previous_row[-1]
-        
-        edit_distance = levenshtein_distance(ref_norm, hyp_norm)
-        cer = edit_distance / len(ref_norm)
-        accuracy = 1.0 - cer
-        
-        return {
-            'character_accuracy': max(0.0, accuracy),
-            'character_error_rate': cer,
-            'reference_length': len(ref_norm),
-            'hypothesis_length': len(hyp_norm),
-            'edit_distance': edit_distance
-        }
     
     def process_single_image(self, image_path: str, ground_truth: Optional[str] = None) -> Dict:
         """
@@ -214,13 +139,50 @@ class OCRBenchmark:
             fps = 1000.0 / avg_inference_ms if avg_inference_ms > 0 else 0.0
             chars_per_second = (total_chars * 1000.0) / avg_inference_ms if avg_inference_ms > 0 else 0.0
             
-            # Calculate accuracy if ground truth is provided
-            accuracy_metrics = None
-            if ground_truth:
+            # Save OCR result to JSON file for accuracy evaluation
+            if self.output_dir:
                 try:
-                    accuracy_metrics = calculate_accuracy_for_dxnn_benchmark(ground_truth, ocr_text)
+                    base_name = os.path.splitext(filename)[0]
+                    ocr_result_file = os.path.join(self.output_dir, f"{base_name}_ocr_result.json")
+                    
+                    ocr_data = {
+                        'filename': filename,
+                        'ocr_text': ocr_text,
+                        'total_chars': total_chars,
+                        'avg_inference_ms': avg_inference_ms,
+                        'detection_results': []
+                    }
+                    
+                    # Add structured results with bounding boxes and texts if available
+                    if detection_boxes is not None and detection_texts is not None:
+                        for i, box in enumerate(detection_boxes):
+                            detection_item = {
+                                'bbox': box.tolist() if hasattr(box, 'tolist') else box,
+                                'text': detection_texts[i] if i < len(detection_texts) else '',
+                                'confidence': float(detection_scores[i]) if detection_scores and i < len(detection_scores) else 0.0
+                            }
+                            ocr_data['detection_results'].append(detection_item)
+                    
+                    # For compatibility, also provide rec_texts format that PaddleOCR expects
+                    if detection_texts:
+                        ocr_data['rec_texts'] = detection_texts
+                    
+                    with open(ocr_result_file, 'w', encoding='utf-8') as f:
+                        json.dump(ocr_data, f, ensure_ascii=False, indent=2)
+                        
                 except Exception as e:
-                    print(f"  [WARNING] Accuracy calculation failed: {e}")
+                    print(f"  [WARNING] Failed to save OCR result: {e}")
+            
+            # Calculate accuracy using PaddleOCR integrated evaluation
+            accuracy_metrics = None
+            if ground_truth and self.ground_truth_file and self.output_dir:
+                try:
+                    accuracy_metrics = calculate_integrated_accuracy_for_benchmark(
+                        self.ground_truth_file, self.output_dir, filename, 
+                        self.position_aware, self.iou_threshold
+                    )
+                except Exception as e:
+                    print(f"  [WARNING] PaddleOCR accuracy calculation failed: {e}")
                     accuracy_metrics = None
             
             result = {
@@ -248,9 +210,14 @@ class OCRBenchmark:
             print(f"  [METRICS] Characters/second: {chars_per_second:.2f}")
             print(f"  [METRICS] Total characters detected: {total_chars}")
             
-            if accuracy_metrics:
-                print(f"  [ACCURACY] Character accuracy: {accuracy_metrics['character_accuracy']*100:.2f}%")
-                print(f"  [ACCURACY] Character error rate: {accuracy_metrics['character_error_rate']*100:.2f}%")
+            if accuracy_metrics and 'error' not in accuracy_metrics:
+                print(f"  [ACCURACY] ACC: {accuracy_metrics['paddleocr_accuracy']*100:.2f}%")
+                
+                # Show position-aware metrics if available
+                if 'detection_precision' in accuracy_metrics:
+                    print(f"  [PRECISION] Precision: {accuracy_metrics['detection_precision']*100:.2f}%")
+                    print(f"  [PRECISION] Recall: {accuracy_metrics['detection_recall']*100:.2f}%")
+                    print(f"  [PRECISION] F-Score: {accuracy_metrics['detection_hmean']*100:.2f}%")
             
             return result
             
@@ -350,11 +317,11 @@ class OCRBenchmark:
         
         # Calculate accuracy statistics if available
         accuracy_values = []
-        cer_values = []
+        similarity_values = []
         for r in successful_results:
-            if r.get('accuracy_metrics'):
-                accuracy_values.append(r['accuracy_metrics']['character_accuracy'])
-                cer_values.append(r['accuracy_metrics']['character_error_rate'])
+            if r.get('accuracy_metrics') and 'error' not in r['accuracy_metrics']:
+                accuracy_values.append(r['accuracy_metrics']['paddleocr_accuracy'])
+                similarity_values.append(r['accuracy_metrics']['character_similarity'])
         
         summary = {
             'model_version': self.version,
@@ -393,17 +360,41 @@ class OCRBenchmark:
         # Add accuracy metrics if available
         if accuracy_values:
             summary['accuracy'] = {
-                'avg_character_accuracy_percent': statistics.mean(accuracy_values) * 100,
-                'min_character_accuracy_percent': min(accuracy_values) * 100,
-                'max_character_accuracy_percent': max(accuracy_values) * 100,
-                'avg_character_error_rate_percent': statistics.mean(cer_values) * 100,
-                'min_character_error_rate_percent': min(cer_values) * 100,
-                'max_character_error_rate_percent': max(cer_values) * 100,
+                'avg_paddleocr_accuracy_percent': statistics.mean(accuracy_values) * 100,
+                'min_paddleocr_accuracy_percent': min(accuracy_values) * 100,
+                'max_paddleocr_accuracy_percent': max(accuracy_values) * 100,
+                'avg_character_similarity_percent': statistics.mean(similarity_values) * 100,
+                'min_character_similarity_percent': min(similarity_values) * 100,
+                'max_character_similarity_percent': max(similarity_values) * 100,
+            }
+        
+        # Add position-aware metrics if available
+        precision_values = []
+        recall_values = []
+        fscore_values = []
+        for r in successful_results:
+            if r.get('accuracy_metrics') and 'error' not in r['accuracy_metrics']:
+                if 'detection_precision' in r['accuracy_metrics']:
+                    precision_values.append(r['accuracy_metrics']['detection_precision'])
+                    recall_values.append(r['accuracy_metrics']['detection_recall'])
+                    fscore_values.append(r['accuracy_metrics']['detection_hmean'])
+        
+        if precision_values:
+            summary['position_metrics'] = {
+                'avg_precision_percent': statistics.mean(precision_values) * 100,
+                'min_precision_percent': min(precision_values) * 100,
+                'max_precision_percent': max(precision_values) * 100,
+                'avg_recall_percent': statistics.mean(recall_values) * 100,
+                'min_recall_percent': min(recall_values) * 100,
+                'max_recall_percent': max(recall_values) * 100,
+                'avg_fscore_percent': statistics.mean(fscore_values) * 100,
+                'min_fscore_percent': min(fscore_values) * 100,
+                'max_fscore_percent': max(fscore_values) * 100,
             }
         
         return summary
     
-    def print_summary_report(self, summary: Dict):
+    def print_summary_report(self, summary: Dict, results: List[Dict] = None):
         """Print formatted summary report in PP-OCRv5-Cpp-Baseline style"""
         print("\n" + "="*100)
         print("DXNN-OCR BENCHMARK RESULTS (PP-OCRv5-Cpp-Baseline Compatible Format)")
@@ -421,11 +412,15 @@ class OCRBenchmark:
             print("="*100)
             return
         
-        print("\n**Test Results**:")
-        print("| Filename | Inference Time (ms) | FPS | CPS (chars/s) | Accuracy (%) |")
-        print("|---|---|---|---|---|")
+        # Check if position-aware results exist to determine table columns
+        has_position_metrics = False
+        if results:
+            has_position_metrics = any(
+                r.get('position_metrics') and 'error' not in r['position_metrics'] 
+                for r in results if r['success']
+            )
         
-        print("="*100)
+        # Table header will be printed by print_pp_ocrv5_style_results
     
     def print_pp_ocrv5_style_results(self, results: List[Dict], summary: Dict):
         """Print detailed results in PP-OCRv5-Cpp-Baseline table format"""
@@ -435,9 +430,20 @@ class OCRBenchmark:
             print("No successful results to display.")
             return
         
+        # Check if position-aware results exist to determine table columns
+        has_position_metrics = any(
+            r.get('accuracy_metrics') and 'error' not in r['accuracy_metrics']
+            and 'detection_precision' in r['accuracy_metrics'] 
+            for r in successful_results
+        )
+        
         print("\n**Test Results**:")
-        print("| Filename | Inference Time (ms) | FPS | CPS (chars/s) | Accuracy (%) |")
-        print("|---|---|---|---|---|")
+        if has_position_metrics:
+            print("| Filename | Inference Time (ms) | FPS | CPS (chars/s) | Accuracy (%) | Precision (%) |")
+            print("|---|---|---|---|---|---|")
+        else:
+            print("| Filename | Inference Time (ms) | FPS | CPS (chars/s) | Accuracy (%) |")
+            print("|---|---|---|---|---|")
         
         # Print each image result
         for result in successful_results:
@@ -448,22 +454,39 @@ class OCRBenchmark:
             
             # Get accuracy if available
             accuracy_str = "N/A"
-            if result.get('accuracy_metrics'):
-                accuracy = result['accuracy_metrics']['character_accuracy'] * 100
+            if result.get('accuracy_metrics') and 'error' not in result['accuracy_metrics']:
+                accuracy = result['accuracy_metrics']['paddleocr_accuracy'] * 100
                 accuracy_str = f"**{accuracy:.2f}**"
             
+            # Get precision if position-aware metrics available
+            precision_str = ""
+            if has_position_metrics:
+                if result.get('accuracy_metrics') and 'error' not in result['accuracy_metrics'] and 'detection_precision' in result['accuracy_metrics']:
+                    precision = result['accuracy_metrics']['detection_precision'] * 100
+                    precision_str = f" | **{precision:.2f}**"
+                else:
+                    precision_str = " | N/A"
+            
             # Bold format for CPS to match original style
-            print(f"| `{filename}` | {inference_time:.2f} | {fps:.2f} | **{cps:.2f}** | {accuracy_str} |")
+            print(f"| `{filename}` | {inference_time:.2f} | {fps:.2f} | **{cps:.2f}** | {accuracy_str}{precision_str} |")
         
         # Print average row
         if 'performance' in summary:
             perf = summary['performance']
             avg_accuracy_str = "N/A"
             if 'accuracy' in summary:
-                avg_accuracy = summary['accuracy']['avg_character_accuracy_percent']
+                avg_accuracy = summary['accuracy']['avg_paddleocr_accuracy_percent']
                 avg_accuracy_str = f"**{avg_accuracy:.2f}**"
             
-            print(f"| **Average** | **{perf['avg_inference_time_ms']:.2f}** | **{perf['avg_fps']:.2f}** | **{perf['avg_chars_per_second']:.2f}** | {avg_accuracy_str} |")
+            # Add precision if available
+            avg_precision_str = ""
+            if has_position_metrics and 'position_metrics' in summary:
+                avg_precision = summary['position_metrics']['avg_precision_percent']
+                avg_precision_str = f" | **{avg_precision:.2f}**"
+            elif has_position_metrics:
+                avg_precision_str = " | N/A"
+            
+            print(f"| **Average** | **{perf['avg_inference_time_ms']:.2f}** | **{perf['avg_fps']:.2f}** | **{perf['avg_chars_per_second']:.2f}** | {avg_accuracy_str}{avg_precision_str} |")
         
         print()
     
@@ -485,7 +508,7 @@ class OCRBenchmark:
         
         if 'accuracy' in summary:
             acc = summary['accuracy']
-            print(f"- Average Character Accuracy: **{acc['avg_character_accuracy_percent']:.2f}%**")
+            print(f"- Average PaddleOCR Accuracy: **{acc['avg_paddleocr_accuracy_percent']:.2f}%**")
         
         print(f"- Success Rate: **{summary['success_rate_percent']:.1f}%** ({summary['successful_images']}/{summary['total_images']} images)")
         print()
@@ -535,8 +558,8 @@ class OCRBenchmark:
                                 drop_score=0.3  # Same threshold as processing
                             )
                             
-                            # Save visualization image
-                            cv2.imwrite(vis_output_path, vis_image)
+                            # Save visualization image with high quality
+                            cv2.imwrite(vis_output_path, vis_image, [cv2.IMWRITE_JPEG_QUALITY, 98])
                             vis_count += 1
                             print(f"  [VIS] Saved: {base_name}_result.jpg")
                         
@@ -590,18 +613,24 @@ class OCRBenchmark:
         csv_file = os.path.join(output_dir, 'benchmark_results.csv')
         with open(csv_file, 'w', encoding='utf-8') as f:
             # Write header
-            f.write("filename,avg_inference_ms,fps,chars_per_second,total_chars,character_accuracy,character_error_rate\n")
+            f.write("filename,avg_inference_ms,fps,chars_per_second,total_chars,paddleocr_accuracy,character_similarity,detection_precision,detection_recall,detection_fscore\n")
             
             # Write data
             for result in results:
                 if result['success']:
                     acc_metrics = result.get('accuracy_metrics', {})
-                    accuracy = acc_metrics.get('character_accuracy', '') if acc_metrics else ''
-                    cer = acc_metrics.get('character_error_rate', '') if acc_metrics else ''
+                    if acc_metrics and 'error' not in acc_metrics:
+                        accuracy = acc_metrics.get('paddleocr_accuracy', '')
+                        similarity = acc_metrics.get('character_similarity', '')
+                        precision = acc_metrics.get('detection_precision', '')
+                        recall = acc_metrics.get('detection_recall', '')
+                        fscore = acc_metrics.get('detection_hmean', '')
+                    else:
+                        accuracy = similarity = precision = recall = fscore = ''
                     
                     f.write(f"{result['filename']},{result['avg_inference_ms']:.2f},"
                            f"{result['fps']:.2f},{result['chars_per_second']:.2f},"
-                           f"{result['total_chars']},{accuracy},{cer}\n")
+                           f"{result['total_chars']},{accuracy},{similarity},{precision},{recall},{fscore}\n")
         
         # Save PP-OCRv5 style markdown report
         markdown_file = os.path.join(output_dir, 'DXNN-OCR_benchmark_report.md')
@@ -633,10 +662,19 @@ class OCRBenchmark:
             f.write(f"- Total Images Tested: {summary['total_images']}\n")
             f.write(f"- Success Rate: {summary['success_rate_percent']:.1f}%\n\n")
             
-            # Test Results Table
+            # Test Results Table - Check if we have position-aware metrics
+            has_position_metrics = any(
+                r.get('accuracy_metrics', {}).get('detection_precision') is not None 
+                for r in successful_results
+            )
+            
             f.write("**Test Results**:\n")
-            f.write("| Filename | Inference Time (ms) | FPS | CPS (chars/s) | Accuracy (%) |\n")
-            f.write("|---|---|---|---|---|\n")
+            if has_position_metrics:
+                f.write("| Filename | Inference Time (ms) | FPS | CPS (chars/s) | Accuracy (%) | Precision (%) |\n")
+                f.write("|---|---|---|---|---|---|\n")
+            else:
+                f.write("| Filename | Inference Time (ms) | FPS | CPS (chars/s) | Accuracy (%) |\n")
+                f.write("|---|---|---|---|---|\n")
             
             # Write each result
             for result in successful_results:
@@ -646,21 +684,46 @@ class OCRBenchmark:
                 cps = result['chars_per_second']
                 
                 accuracy_str = "N/A"
-                if result.get('accuracy_metrics'):
-                    accuracy = result['accuracy_metrics']['character_accuracy'] * 100
-                    accuracy_str = f"**{accuracy:.2f}**"
+                precision_str = "N/A"
                 
-                f.write(f"| `{filename}` | {inference_time:.2f} | {fps:.2f} | **{cps:.2f}** | {accuracy_str} |\n")
+                if result.get('accuracy_metrics'):
+                    accuracy = result['accuracy_metrics']['paddleocr_accuracy'] * 100
+                    accuracy_str = f"**{accuracy:.2f}**"
+                    
+                    if 'detection_precision' in result['accuracy_metrics']:
+                        precision = result['accuracy_metrics']['detection_precision'] * 100
+                        precision_str = f"**{precision:.2f}**"
+                
+                if has_position_metrics:
+                    f.write(f"| `{filename}` | {inference_time:.2f} | {fps:.2f} | **{cps:.2f}** | {accuracy_str} | {precision_str} |\n")
+                else:
+                    f.write(f"| `{filename}` | {inference_time:.2f} | {fps:.2f} | **{cps:.2f}** | {accuracy_str} |\n")
             
             # Average row
             if 'performance' in summary:
                 perf = summary['performance']
                 avg_accuracy_str = "N/A"
+                avg_precision_str = "N/A"
+                
                 if 'accuracy' in summary:
-                    avg_accuracy = summary['accuracy']['avg_character_accuracy_percent']
+                    avg_accuracy = summary['accuracy']['avg_paddleocr_accuracy_percent']
                     avg_accuracy_str = f"**{avg_accuracy:.2f}**"
                 
-                f.write(f"| **Average** | **{perf['avg_inference_time_ms']:.2f}** | **{perf['avg_fps']:.2f}** | **{perf['avg_chars_per_second']:.2f}** | {avg_accuracy_str} |\n\n")
+                # Calculate average precision if available
+                if has_position_metrics:
+                    precision_values = []
+                    for result in successful_results:
+                        acc_metrics = result.get('accuracy_metrics', {})
+                        if 'detection_precision' in acc_metrics:
+                            precision_values.append(acc_metrics['detection_precision'])
+                    
+                    if precision_values:
+                        avg_precision = sum(precision_values) / len(precision_values) * 100
+                        avg_precision_str = f"**{avg_precision:.2f}**"
+                    
+                    f.write(f"| **Average** | **{perf['avg_inference_time_ms']:.2f}** | **{perf['avg_fps']:.2f}** | **{perf['avg_chars_per_second']:.2f}** | {avg_accuracy_str} | {avg_precision_str} |\n\n")
+                else:
+                    f.write(f"| **Average** | **{perf['avg_inference_time_ms']:.2f}** | **{perf['avg_fps']:.2f}** | **{perf['avg_chars_per_second']:.2f}** | {avg_accuracy_str} |\n\n")
             
             # Performance Summary
             f.write("**Performance Summary**:\n")
@@ -677,9 +740,31 @@ class OCRBenchmark:
                 
                 if 'accuracy' in summary:
                     acc = summary['accuracy']
-                    f.write(f"- Average Character Accuracy: **{acc['avg_character_accuracy_percent']:.2f}%**\n")
+                    f.write(f"- Average PaddleOCR Accuracy: **{acc['avg_paddleocr_accuracy_percent']:.2f}%**\n")
                 
                 f.write(f"- Success Rate: **{summary['success_rate_percent']:.1f}%** ({summary['successful_images']}/{summary['total_images']} images)\n")
+                
+                # Add position-aware metrics to Performance Summary if available
+                if has_position_metrics:
+                    precision_values = []
+                    recall_values = []
+                    fscore_values = []
+                    
+                    for result in successful_results:
+                        acc_metrics = result.get('accuracy_metrics', {})
+                        if 'detection_precision' in acc_metrics:
+                            precision_values.append(acc_metrics['detection_precision'])
+                            recall_values.append(acc_metrics['detection_recall'])
+                            fscore_values.append(acc_metrics['detection_hmean'])
+                    
+                    if precision_values:
+                        avg_precision = sum(precision_values) / len(precision_values) * 100
+                        avg_recall = sum(recall_values) / len(recall_values) * 100
+                        avg_fscore = sum(fscore_values) / len(fscore_values) * 100
+                        
+                        f.write(f"- Average Detection Precision: **{avg_precision:.2f}%**\n")
+                        f.write(f"- Average Detection Recall: **{avg_recall:.2f}%**\n")
+                        f.write(f"- Average Detection F-Score: **{avg_fscore:.2f}%**\n")
 
 
 def load_xfund_ground_truth(json_path: str) -> Dict[str, str]:
@@ -782,6 +867,10 @@ Examples:
     
     # Accuracy evaluation
     parser.add_argument('--ground-truth', help='Path to XFUND ground truth JSON file')
+    parser.add_argument('--position-aware', action='store_true', 
+                       help='Enable position-aware evaluation (Precision/Recall/F-Score)')
+    parser.add_argument('--iou-threshold', type=float, default=0.5,
+                       help='IoU threshold for position-aware evaluation (default: 0.5)')
     
     # Output options
     parser.add_argument('--output', '-o', help='Directory to save results')
@@ -826,14 +915,24 @@ Examples:
         ground_truths = load_xfund_ground_truth(args.ground_truth)
     
     # Initialize benchmark
-    benchmark = OCRBenchmark(version='v5', workers=1, runs_per_image=args.runs)
+    benchmark = OCRBenchmark(version='v5', workers=1, runs_per_image=args.runs, 
+                           position_aware=args.position_aware, iou_threshold=args.iou_threshold)
+    
+    # Set ground truth file and output directory for integrated evaluation BEFORE processing
+    if args.ground_truth:
+        benchmark.ground_truth_file = args.ground_truth
+    if args.output:
+        # Create output directory structure first
+        json_dir = os.path.join(args.output, 'json')
+        os.makedirs(json_dir, exist_ok=True)
+        benchmark.output_dir = json_dir
     
     # Process images
     results = benchmark.process_batch(image_files, ground_truths)
     
     # Generate and print summary
     summary = benchmark.generate_summary_report(results)
-    benchmark.print_summary_report(summary)
+    benchmark.print_summary_report(summary, results)
     benchmark.print_pp_ocrv5_style_results(results, summary)
     benchmark.print_pp_ocrv5_style_summary(summary)
     
@@ -854,8 +953,28 @@ Examples:
                         'filename': filename,
                         'ocr_text': result['ocr_text'],
                         'total_chars': result['total_chars'],
-                        'avg_inference_ms': result['avg_inference_ms']
+                        'avg_inference_ms': result['avg_inference_ms'],
+                        # Add structured OCR results with position information
+                        'detection_results': []
                     }
+                    
+                    # Add structured results with bounding boxes and texts if available
+                    if 'detection_boxes' in result and 'detection_texts' in result:
+                        boxes = result['detection_boxes'] 
+                        texts = result.get('detection_texts', [])
+                        scores = result.get('detection_scores', [])
+                        
+                        for i, box in enumerate(boxes):
+                            detection_item = {
+                                'bbox': box.tolist() if hasattr(box, 'tolist') else box,
+                                'text': texts[i] if i < len(texts) else '',
+                                'confidence': float(scores[i]) if i < len(scores) else 0.0
+                            }
+                            ocr_data['detection_results'].append(detection_item)
+                    
+                    # For compatibility, also provide rec_texts format that PaddleOCR expects
+                    if 'detection_texts' in result:
+                        ocr_data['rec_texts'] = result['detection_texts']
                     
                     with open(ocr_result_file, 'w', encoding='utf-8') as f:
                         json.dump(ocr_data, f, ensure_ascii=False, indent=2)
