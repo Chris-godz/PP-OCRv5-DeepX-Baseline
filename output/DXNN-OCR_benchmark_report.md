@@ -1,3 +1,11 @@
+# DXNN-OCR Benchmark Report
+
+**Test Configuration**:
+- Model: PP-OCR v5 (DEEPX NPU acceleration)
+- Total Images Tested: 20
+- Success Rate: 100.0%
+
+**Test Results**:
 | Filename | Inference Time (ms) | FPS | CPS (chars/s) | Accuracy (%) |
 |---|---|---|---|---|
 | `image_1.png` | 89.11 | 11.22 | **89.78** | **57.14** |
@@ -21,3 +29,13 @@
 | `image_8.png` | 1379.40 | 0.72 | **303.75** | **85.50** |
 | `image_9.png` | 1923.65 | 0.52 | **436.67** | **96.75** |
 | **Average** | **1151.77** | **2.94** | **255.17** | **68.56** |
+
+**Performance Summary**:
+- Average Inference Time: **1151.77 ms**
+- Average FPS: **2.94**
+- Average CPS: **255.17 chars/s**
+- Total Characters Detected: **7636**
+- Model Initialization Time: **4629.13 ms**
+- Total Processing Time: **72216.61 ms**
+- Average Character Accuracy: **68.56%**
+- Success Rate: **100.0%** (20/20 images)

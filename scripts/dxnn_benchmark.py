@@ -22,7 +22,7 @@ import unicodedata
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from scripts.ocr_engine import create_ocr_workers
-from scripts.calculate_acc import calculate_accuracy_for_dxnn_benchmark
+from scripts.calculate_acc import calculate_research_standard_accuracy
 
 
 class OCRBenchmark:
@@ -218,7 +218,10 @@ class OCRBenchmark:
             accuracy_metrics = None
             if ground_truth:
                 try:
-                    accuracy_metrics = calculate_accuracy_for_dxnn_benchmark(ground_truth, ocr_text)
+                    # Create mock structures for compatibility with calculate_research_standard_accuracy
+                    mock_gt = {'document': [{'text': ground_truth}]}
+                    mock_ocr = {'rec_texts': [ocr_text]}
+                    accuracy_metrics = calculate_research_standard_accuracy(mock_gt, mock_ocr, debug=False)
                 except Exception as e:
                     print(f"  [WARNING] Accuracy calculation failed: {e}")
                     accuracy_metrics = None
@@ -682,6 +685,48 @@ class OCRBenchmark:
                 f.write(f"- Success Rate: **{summary['success_rate_percent']:.1f}%** ({summary['successful_images']}/{summary['total_images']} images)\n")
 
 
+def load_labels_ground_truth(json_path: str) -> Dict[str, str]:
+    """
+    Load labels.json format ground truth annotations (C++ baseline format)
+    
+    Args:
+        json_path: Path to labels.json annotation file
+        
+    Returns:
+        Dictionary mapping image filenames to ground truth text
+    """
+    if not os.path.exists(json_path):
+        print(f"Warning: Ground truth file not found: {json_path}")
+        return {}
+    
+    try:
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        ground_truths = {}
+        
+        # Handle labels.json format: {"image_name": [{"text": "...", "bbox": [...]}, ...], ...}
+        for image_name, annotations in data.items():
+            if isinstance(annotations, list):
+                # Extract all text from annotations
+                texts = []
+                for annotation in annotations:
+                    if isinstance(annotation, dict) and 'text' in annotation:
+                        text = annotation['text'].strip()
+                        if text:
+                            texts.append(text)
+                
+                # Join all texts directly (no spaces, matching C++ baseline)
+                ground_truths[image_name] = ''.join(texts)
+        
+        print(f"Loaded ground truth for {len(ground_truths)} images from {json_path}")
+        return ground_truths
+        
+    except Exception as e:
+        print(f"Error loading ground truth from {json_path}: {e}")
+        return {}
+
+
 def load_xfund_ground_truth(json_path: str) -> Dict[str, str]:
     """
     Load XFUND dataset ground truth annotations
@@ -728,6 +773,41 @@ def load_xfund_ground_truth(json_path: str) -> Dict[str, str]:
         
     except Exception as e:
         print(f"Error loading ground truth from {json_path}: {e}")
+        return {}
+
+
+def load_ground_truth(json_path: str) -> Dict[str, str]:
+    """
+    Auto-detect and load ground truth annotations (supports both XFUND and labels.json formats)
+    
+    Args:
+        json_path: Path to ground truth JSON annotation file
+        
+    Returns:
+        Dictionary mapping image filenames to ground truth text
+    """
+    if not os.path.exists(json_path):
+        print(f"Warning: Ground truth file not found: {json_path}")
+        return {}
+    
+    try:
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        # Auto-detect format
+        if isinstance(data, dict):
+            # Check if it looks like labels.json format (image names as keys)
+            sample_keys = list(data.keys())[:3]  # Check first few keys
+            if sample_keys and any('.png' in key or '.jpg' in key for key in sample_keys):
+                print(f"Detected labels.json format (C++ baseline)")
+                return load_labels_ground_truth(json_path)
+        
+        # Otherwise assume XFUND format
+        print(f"Detected XFUND format")
+        return load_xfund_ground_truth(json_path)
+        
+    except Exception as e:
+        print(f"Error detecting ground truth format from {json_path}: {e}")
         return {}
 
 
@@ -823,7 +903,7 @@ Examples:
     # Load ground truth if provided
     ground_truths = None
     if args.ground_truth:
-        ground_truths = load_xfund_ground_truth(args.ground_truth)
+        ground_truths = load_ground_truth(args.ground_truth)
     
     # Initialize benchmark
     benchmark = OCRBenchmark(version='v5', workers=1, runs_per_image=args.runs)

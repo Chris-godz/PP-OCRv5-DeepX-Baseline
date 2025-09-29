@@ -17,5 +17,4 @@ pyclipper
 tqdm
 requests
 
-# Data handling
-lmdb
+jiwer

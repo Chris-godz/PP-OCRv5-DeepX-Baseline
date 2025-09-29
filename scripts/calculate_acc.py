@@ -2,7 +2,6 @@
 """
 Research-standard OCR accuracy calculator following academic papers
 Implements standard CER and WER calculations used in OCR research
-Adapted from PP-OCRv5-Cpp-Baseline for DXNN-OCR project
 """
 
 import json
@@ -11,6 +10,7 @@ import os
 import sys
 from typing import Dict, List, Tuple, Optional
 import unicodedata
+import jiwer
 
 def normalize_text_research_standard(text: str) -> str:
     """
@@ -49,7 +49,8 @@ def normalize_text_research_standard(text: str) -> str:
 
 def calculate_character_error_rate(reference: str, hypothesis: str) -> Dict[str, float]:
     """
-    Calculate Character Error Rate (CER) and other metrics using Levenshtein distance.
+    Calculate Character Error Rate (CER) and other metrics using the jiwer library.
+    jiwer is a standard, well-tested library for this purpose.
     """
     ref_norm = normalize_text_research_standard(reference)
     hyp_norm = normalize_text_research_standard(hypothesis)
@@ -65,69 +66,64 @@ def calculate_character_error_rate(reference: str, hypothesis: str) -> Dict[str,
             'hyp_length': len(hyp_norm)
         }
 
-    # Calculate Levenshtein distance and detailed operations
-    def levenshtein_with_ops(s1, s2):
-        """Calculate Levenshtein distance with operation counts."""
-        len1, len2 = len(s1), len(s2)
-        
-        # Create matrix
-        matrix = [[0] * (len2 + 1) for _ in range(len1 + 1)]
-        
-        # Initialize first row and column
-        for i in range(len1 + 1):
-            matrix[i][0] = i  # deletions
-        for j in range(len2 + 1):
-            matrix[0][j] = j  # insertions
-        
-        # Fill matrix
-        for i in range(1, len1 + 1):
-            for j in range(1, len2 + 1):
-                if s1[i-1] == s2[j-1]:
-                    cost = 0
-                else:
-                    cost = 1
-                
-                matrix[i][j] = min(
-                    matrix[i-1][j] + 1,      # deletion
-                    matrix[i][j-1] + 1,      # insertion
-                    matrix[i-1][j-1] + cost  # substitution
-                )
-        
-        return matrix[len1][len2]
+    # Use jiwer to compute all metrics at once
+    # For character-level, we pass the strings directly.
+    # For word-level, we would pass lists of words.
+    error = jiwer.cer(ref_norm, hyp_norm)
     
-    distance = levenshtein_with_ops(ref_norm, hyp_norm)
-    error_rate = distance / len(ref_norm)
-    accuracy = max(0.0, 1.0 - error_rate)
+    # Manually calculate accuracy from the error rate
+    accuracy = max(0.0, 1.0 - error)
     
+    # To get detailed S/I/D counts, we can use process_words/process_characters
+    # but for simplicity and to match the core metric, cer is sufficient.
+    # Let's get the detailed output for the full report.
+    output = jiwer.process_characters(ref_norm, hyp_norm)
+
     return {
-        'cer': error_rate,
+        'cer': error,
         'accuracy': accuracy,
-        'substitutions': distance,  # Simplified - actual substitution count would need backtracking
-        'insertions': 0,
-        'deletions': 0,
+        'substitutions': output.substitutions,
+        'insertions': output.insertions,
+        'deletions': output.deletions,
         'ref_length': len(ref_norm),
         'hyp_length': len(hyp_norm)
     }
 
+def calculate_word_error_rate(reference: str, hypothesis: str) -> Dict[str, float]:
+    """
+    Calculate Word Error Rate (WER) using the jiwer library.
+    """
+    ref_norm = normalize_text_research_standard(reference)
+    hyp_norm = normalize_text_research_standard(hypothesis)
+    
+    # Use jiwer's default transformation, which handles splitting into words.
+    error = jiwer.wer(ref_norm, hyp_norm)
+    accuracy = max(0.0, 1.0 - error)
+    output = jiwer.process_words(ref_norm, hyp_norm)
+    
+    return {
+        'wer': error,
+        'accuracy': accuracy,
+        'ref_word_count': output.references,
+        'hyp_word_count': output.hypotheses
+    }
+
 def calculate_research_standard_accuracy(ground_truth: Dict, ocr_result: Dict, debug: bool = False) -> Dict:
     """
-    Calculate OCR accuracy using research-standard methods - FIXED for XFUND format
+    Calculate OCR accuracy using research-standard methods - UPDATED for custom dataset format
     """
     
-    # Extract ground truth texts from XFUND format - CORRECTED
+    # Extract ground truth texts from custom dataset format
     gt_texts = []
     if 'document' in ground_truth:
         for item in ground_truth['document']:
             if 'text' in item:
                 gt_texts.append(item['text'])
     
-    # Extract OCR prediction texts from DXNN-OCR format
+    # Extract OCR prediction texts from PaddleOCR format
     pred_texts = []
     if 'rec_texts' in ocr_result:
         pred_texts = ocr_result['rec_texts']
-    elif 'ocr_text' in ocr_result:
-        # Handle single string format
-        pred_texts = [ocr_result['ocr_text']]
     
     # Combine all text
     gt_combined = ''.join(gt_texts)  # NO SPACES - direct concatenation
@@ -148,6 +144,29 @@ def calculate_research_standard_accuracy(ground_truth: Dict, ocr_result: Dict, d
     # Calculate character-level metrics
     char_metrics = calculate_character_error_rate(gt_combined, pred_combined)
     
+    # Calculate word-level metrics
+    word_metrics = calculate_word_error_rate(gt_combined, pred_combined)
+    
+    # Calculate exact match
+    gt_norm = normalize_text_research_standard(gt_combined)
+    pred_norm = normalize_text_research_standard(pred_combined)
+    exact_match = 1.0 if gt_norm == pred_norm else 0.0
+    
+    # Calculate detection metrics
+    gt_regions = len(gt_texts)
+    detected_regions = len(pred_texts)
+    
+    detection_recall = min(detected_regions / gt_regions, 1.0) if gt_regions > 0 else 1.0
+    detection_precision = min(gt_regions / detected_regions, 1.0) if detected_regions > 0 else 0.0
+    
+    # Calculate F1 score for overall text similarity (research standard)
+    if char_metrics['ref_length'] > 0 and char_metrics['hyp_length'] > 0:
+        precision = max(0, (char_metrics['hyp_length'] - char_metrics['insertions']) / char_metrics['hyp_length'])
+        recall = max(0, (char_metrics['ref_length'] - char_metrics['deletions']) / char_metrics['ref_length'])
+        f1_score = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+    else:
+        f1_score = 0.0
+    
     return {
         # ONLY Character Accuracy - simplified output
         'character_accuracy': char_metrics['accuracy'],
@@ -156,23 +175,26 @@ def calculate_research_standard_accuracy(ground_truth: Dict, ocr_result: Dict, d
         # Debug info
         'reference_length': char_metrics['ref_length'],
         'hypothesis_length': char_metrics['hyp_length'],
-        'edit_distance': char_metrics['substitutions']
+        'substitutions': char_metrics['substitutions'],
+        'insertions': char_metrics['insertions'],
+        'deletions': char_metrics['deletions']
     }
 
 def load_ground_truth_for_image(ground_truth_file: str, image_name: str) -> Optional[Dict]:
-    """Load ground truth data for a specific image - FIXED for XFUND format"""
+    """Load ground truth data for a specific image - UPDATED for custom dataset format"""
     try:
         with open(ground_truth_file, 'r', encoding='utf-8') as f:
             gt_data = json.load(f)
         
-        # XFUND format has documents array
-        documents = gt_data.get('documents', [])
-        image_base = os.path.splitext(image_name)[0]
-        
-        for doc in documents:
-            doc_id = doc.get('id', '')
-            if doc_id == image_base:
-                return doc
+        # Custom dataset format: direct image name keys
+        if image_name in gt_data:
+            # Convert custom format to expected format
+            texts = []
+            for item in gt_data[image_name]:
+                if 'text' in item:
+                    texts.append({'text': item['text']})
+            
+            return {'document': texts}
         
         print(f"Warning: Ground truth not found for image: {image_name}")
         return None
@@ -182,10 +204,10 @@ def load_ground_truth_for_image(ground_truth_file: str, image_name: str) -> Opti
         return None
 
 def load_ocr_result_for_image(output_dir: str, image_name: str) -> Optional[Dict]:
-    """Load OCR result for a specific image from DXNN-OCR output"""
+    """Load OCR result for a specific image"""
     try:
         base_name = os.path.splitext(image_name)[0]
-        json_filename = f"{base_name}_ocr_result.json"
+        json_filename = f"{base_name}_res.json"
         json_path = os.path.join(output_dir, json_filename)
         
         if not os.path.exists(json_path):
@@ -201,46 +223,47 @@ def load_ocr_result_for_image(output_dir: str, image_name: str) -> Optional[Dict
         print(f"Error loading OCR result: {e}")
         return None
 
-def calculate_accuracy_for_dxnn_benchmark(ground_truth_text: str, ocr_text: str, debug: bool = False) -> Dict:
+def calculate_accuracy():
     """
-    Calculate accuracy metrics for DXNN benchmark - simplified interface
+    This function is now a placeholder. The main logic is handled in startup.sh
+    which processes all images and then calls this script for each one.
+    This script is now focused on single-image calculation.
     """
-    # Create mock structures to reuse existing calculation logic
-    mock_gt = {'document': [{'text': ground_truth_text}]}
-    mock_ocr = {'ocr_text': ocr_text}
-    
-    return calculate_research_standard_accuracy(mock_gt, mock_ocr, debug)
+    pass
 
 def main():
-    parser = argparse.ArgumentParser(description='Calculate OCR accuracy for DXNN-OCR benchmark')
-    parser.add_argument('--ground_truth', required=True, help='Path to the XFUND ground truth JSON file (e.g., zh.val.json)')
-    parser.add_argument('--output_dir', required=True, help='Directory containing DXNN-OCR output JSON files')
-    parser.add_argument('--image_name', required=True, help='The specific image file name to process (e.g., zh_val_0.jpg)')
+    parser = argparse.ArgumentParser(description='Calculate OCR accuracy for a single image')
+    parser.add_argument('--ground_truth', required=True, help='Path to the master ground truth JSON file (e.g., labels.json)')
+    parser.add_argument('--output_dir', required=True, help='Directory containing OCR output JSON files')
+    parser.add_argument('--image_name', required=True, help='The specific image file name to process (e.g., image_0.png)')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode to print raw and normalized texts')
+    parser.add_argument('--results_file', help=argparse.SUPPRESS) # Suppress help for this unused arg
 
     args = parser.parse_args()
 
     # Load the specific ground truth document for the given image
     gt_data = load_ground_truth_for_image(args.ground_truth, args.image_name)
     if gt_data is None:
+        # This is a critical error for single-image calculation
         print(f"ERROR: Ground truth not found for {args.image_name} in {args.ground_truth}", file=sys.stderr)
-        print(f"ACCURACY_RESULT: {{\"error\": \"Ground truth not found for {args.image_name}\"}}")
+        # Return a JSON error message for the C++ application to parse
+        print(f"SINGLE_ACC: {{\"error\": \"Ground truth not found for {args.image_name}\"}}")
         sys.exit(1)
 
     # Load the corresponding OCR result
     ocr_data = load_ocr_result_for_image(args.output_dir, args.image_name)
     if ocr_data is None:
         print(f"ERROR: OCR result not found for {args.image_name} in {args.output_dir}", file=sys.stderr)
-        print(f"ACCURACY_RESULT: {{\"error\": \"OCR result not found for {args.image_name}\"}}")
+        print(f"SINGLE_ACC: {{\"error\": \"OCR result not found for {args.image_name}\"}}")
         sys.exit(1)
 
     # Calculate the accuracy metrics
     accuracy_metrics = calculate_research_standard_accuracy(gt_data, ocr_data, debug=args.debug)
 
-    # Print a clean, human-readable summary
+    # Print a clean, human-readable summary to stderr for immediate feedback in the log
     summary = f"""
 ========================================
-DXNN-OCR ACCURACY EVALUATION
+CHARACTER ACCURACY EVALUATION
 ========================================
 Image: {args.image_name}
 Character Accuracy: {accuracy_metrics['character_accuracy']*100:.2f}%
@@ -250,8 +273,8 @@ Ref Length: {accuracy_metrics['reference_length']}, Hyp Length: {accuracy_metric
 """
     print(summary, file=sys.stderr)
 
-    # Print the machine-readable JSON result
-    print(f"ACCURACY_RESULT: {json.dumps(accuracy_metrics, ensure_ascii=False)}")
+    # Print the machine-readable JSON to stdout, prefixed for easy parsing by the C++ app
+    print(f"SINGLE_ACC: {json.dumps(accuracy_metrics, ensure_ascii=False)}")
 
 if __name__ == "__main__":
     main()

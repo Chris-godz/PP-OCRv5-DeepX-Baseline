@@ -140,9 +140,9 @@ else
     exit 1
 fi
 
-# Verify key packages are installed
-REQUIRED_PACKAGES=("paddleocr" "opencv-python" "numpy" "Pillow")
-log "Verifying required packages..."
+# Verify essential packages are installed
+REQUIRED_PACKAGES=("numpy")
+log "Verifying essential packages..."
 for pkg in "${REQUIRED_PACKAGES[@]}"; do
     if python -c "import ${pkg//-/_}" 2>/dev/null; then
         log "✓ Package verified: $pkg"
@@ -152,64 +152,58 @@ for pkg in "${REQUIRED_PACKAGES[@]}"; do
 done
 
 # =============================================================================
-# Dataset Setup (following PP-OCRv5 methodology)
+# Dataset Setup (following C++ Baseline methodology)
 # =============================================================================
 
-log "=== Setting up XFUND Dataset ==="
+log "=== Verifying C++ Baseline Dataset ==="
 
-setup_xfund_dataset() {
-    local dataset_dir="$PROJECT_ROOT/images/xfund"
+verify_dataset() {
+    local dataset_dir="$PROJECT_ROOT/images"
     
-    mkdir -p "$dataset_dir"
-    cd "$dataset_dir"
-    
-    # Download XFUND validation dataset (matching PP-OCRv5 approach)
-    local xfund_base_url="https://github.com/doc-analysis/XFUND/releases/download/v1.0"
-    
-    if [[ ! -f "zh.val.zip" ]]; then
-        log "Downloading XFUND validation dataset..."
-        wget -q --show-progress "$xfund_base_url/zh.val.zip" || {
-            log "ERROR: Failed to download zh.val.zip"
-            return 1
-        }
-        log "✓ Downloaded zh.val.zip"
-    else
-        log "✓ zh.val.zip already exists"
+    # Check if labels.json exists (copied from C++ baseline)
+    if [[ ! -f "$dataset_dir/labels.json" ]]; then
+        log "ERROR: labels.json not found. Please ensure you have copied the dataset from PP-OCRv5-Cpp-Baseline"
+        log "Expected path: $dataset_dir/labels.json"
+        return 1
     fi
     
-    if [[ ! -f "zh.val.json" ]]; then
-        log "Downloading XFUND validation annotations..."
-        wget -q --show-progress "$xfund_base_url/zh.val.json" || {
-            log "ERROR: Failed to download zh.val.json"
-            return 1
-        }
-        log "✓ Downloaded zh.val.json"
+    log "✓ labels.json found"
+    
+    # Verify we have image files
+    local image_count=$(find "$dataset_dir" -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" | wc -l)
+    if [[ $image_count -lt 10 ]]; then
+        log "WARNING: Only $image_count images found. Please ensure image files are copied from C++ baseline"
     else
-        log "✓ zh.val.json already exists"
+        log "✓ Dataset ready: $image_count images found"
     fi
     
-    # Extract images if not already extracted
-    if [[ ! -d "images" ]] || [[ $(find images -name "*.jpg" | wc -l) -lt 50 ]]; then
-        log "Extracting XFUND validation images..."
-        unzip -q zh.val.zip
-        if [[ -d "zh_val" ]]; then
-            mv zh_val images
-        fi
-        log "✓ XFUND images extracted"
-    else
-        log "✓ XFUND images already extracted"
-    fi
+    # Check if we have the correct format by examining labels.json structure
+    python3 -c "
+import json
+try:
+    with open('$dataset_dir/labels.json', 'r') as f:
+        data = json.load(f)
+    print(f'Labels file contains {len(data)} entries')
+    # Check if it's the expected format (image names as keys)
+    sample_key = list(data.keys())[0] if data else None
+    if sample_key and '.png' in sample_key:
+        print('✓ Format appears correct (C++ baseline format)')
+    else:
+        print('⚠ Format may not be correct')
+except Exception as e:
+    print(f'ERROR reading labels.json: {e}')
+    exit(1)
+" || return 1
     
-    # Verify dataset
-    local image_count=$(find images -name "*.jpg" | wc -l)
-    log "✓ XFUND dataset ready: $image_count images found"
-    
-    cd "$PROJECT_ROOT"
+    return 0
 }
 
-# Setup dataset
-if ! setup_xfund_dataset; then
-    log "ERROR: Failed to setup XFUND dataset"
+# Verify dataset
+if ! verify_dataset; then
+    log "ERROR: Dataset verification failed"
+    log "Please ensure you have:"
+    log "1. Copied labels.json from PP-OCRv5-Cpp-Baseline/images/"
+    log "2. Copied image files from PP-OCRv5-Cpp-Baseline/images/"
     exit 1
 fi
 
@@ -229,14 +223,14 @@ log "✓ Python version: $PYTHON_VERSION"
 
 log "=== Starting DXNN-OCR Benchmark ==="
 
-# Function to run benchmark (following PP-OCRv5 pattern)
+# Function to run benchmark (following C++ Baseline pattern)
 run_benchmark() {
-    log "Executing DXNN benchmark with XFUND dataset..."
+    log "Executing DXNN benchmark with C++ baseline dataset..."
     
     # Prepare benchmark command
     local benchmark_cmd="python -u scripts/dxnn_benchmark.py"
-    benchmark_cmd+=" --directory images/xfund"
-    benchmark_cmd+=" --ground-truth images/xfund/zh.val.json"
+    benchmark_cmd+=" --directory images"
+    benchmark_cmd+=" --ground-truth images/labels.json"
     benchmark_cmd+=" --output output"
     benchmark_cmd+=" --runs 3"
     benchmark_cmd+=" --save-individual"
@@ -293,7 +287,7 @@ fi
 
 log "=== Benchmark Completion Summary ==="
 log "✓ Environment: $CONDA_DEFAULT_ENV"
-log "✓ Dataset: XFUND validation set"
+log "✓ Dataset: C++ baseline format (labels.json)"
 log "✓ Results: output/"
 log "✓ Logs: $LOG_DIR/"
 
@@ -312,5 +306,5 @@ echo "Log files: $LOG_DIR/"
 echo ""
 echo "To re-run benchmark only:"
 echo "  conda activate $ENV_NAME"
-echo "  python -u scripts/dxnn_benchmark.py --dataset_path images/xfund --ground_truth images/xfund/zh.val.json"
+echo "  python -u scripts/dxnn_benchmark.py --directory images --ground-truth images/labels.json"
 echo ""
