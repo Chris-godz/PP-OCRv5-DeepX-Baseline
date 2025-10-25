@@ -1,4 +1,4 @@
-from enum import IntEnum, StrEnum
+from enum import Enum, IntEnum
 from typing import Union
 
 import cv2
@@ -6,7 +6,7 @@ import numpy as np
 from PIL import Image
 
 
-class ColorConvertForm(StrEnum):
+class ColorConvertForm(str, Enum):
     BGR2RGB = "BGR2RGB"
     BGR2GRAY = "BGR2GRAY"
 
@@ -23,7 +23,7 @@ class Cv2CorlorConversionCode(IntEnum):
     BGR2GRAY = 6
 
 
-class PILColorConversionMode(StrEnum):
+class PILColorConversionMode(str, Enum):
     BGR2RGB = "RGB"
 
 

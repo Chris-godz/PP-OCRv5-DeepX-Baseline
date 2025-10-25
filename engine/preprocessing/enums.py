@@ -1,12 +1,12 @@
-from enum import IntEnum, StrEnum, auto
+from enum import Enum, IntEnum, auto
 
-class SessionType(StrEnum):
+class SessionType(str, Enum):
     onnxruntime = "OnnxRuntime"
     simulator = "Simulator"
     dxruntime = "DxRuntime"
 
 
-class EvaluationType(StrEnum):
+class EvaluationType(str, Enum):
     image_classification = "ImageClassification"
     coco = "ObjectDection"
     segmentation = "ImageSegmentation"
@@ -30,7 +30,7 @@ class EvaluationType(StrEnum):
             raise ValueError(f"Invalid Evaluation Type value. {self.value}")
 
 
-class DatasetType(StrEnum):
+class DatasetType(str, Enum):
     imagenet = "ImageNet"
     coco = "COCO"
     voc_seg = "VOCSegmentation"
@@ -41,7 +41,7 @@ class DatasetType(StrEnum):
     omnidoc = "OmniDocBench"
 
 
-class ResizeMode(StrEnum):
+class ResizeMode(str, Enum):
     torchvision = auto()
     default = auto()
     pad = auto()
@@ -53,7 +53,7 @@ class ResizeMode(StrEnum):
         return value in cls._value2member_map_
 
 
-class ResizeArgEnum(StrEnum):
+class ResizeArgEnum(str, Enum):
     size = auto()
     interpolation = auto()
     backend = auto()
@@ -63,23 +63,23 @@ class ResizeArgEnum(StrEnum):
     pad_value = auto()
 
 
-class BackendEnum(StrEnum):
+class BackendEnum(str, Enum):
     cv2 = auto()
     pil = auto()
 
 
-class AlignSideEnum(StrEnum):
+class AlignSideEnum(str, Enum):
     both = auto()
     long = auto()
     short = auto()
 
 
-class ScaleMethodEnum(StrEnum):
+class ScaleMethodEnum(str, Enum):
     scale_up = auto()
     scale_down = auto()
 
 
-class InterpolationEnum(StrEnum):
+class InterpolationEnum(str, Enum):
     BILINEAR = "BILINEAR"
     LINEAR = "LINEAR"
     NEAREST = "NEAREST"
