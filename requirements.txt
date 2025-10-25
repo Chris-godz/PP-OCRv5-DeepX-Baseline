@@ -10,7 +10,7 @@ imgaug
 lmdb
 tqdm
 PySide6
-numpy==1.26.4
+numpy==1.24.4
 onnxruntime==1.18.0
 torch==2.3.0
 torchvision==0.18.0

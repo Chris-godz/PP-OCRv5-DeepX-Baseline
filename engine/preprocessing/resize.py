@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple, Union
 
 import math
 import cv2
@@ -57,7 +57,7 @@ ARGS_FOR_MODE = {
 @dataclass
 class ResizeArgs:
     backend: BackendEnum
-    size: Optional[int | List] = None
+    size: Optional[Union[int, List]] = None
     interpolation: InterpolationEnum = InterpolationEnum.LINEAR
     width: Optional[int] = None
     height: Optional[int] = None
@@ -83,7 +83,7 @@ class CV2Resize:
         self.size = size
         self.interpolation = interpolation
 
-    def __call__(self, inputs: np.ndarray | Image.Image, aligned_size: Tuple[int, int], *args, **kwargs) -> np.ndarray:
+    def __call__(self, inputs: Union[np.ndarray, Image.Image], aligned_size: Tuple[int, int], *args, **kwargs) -> np.ndarray:
         if isinstance(inputs, Image.Image):
             inputs = np.array(inputs)
         aligned_height, aligned_width = aligned_size
@@ -101,7 +101,7 @@ class TorchVisionResize:
 
     def __call__(
         self,
-        inputs: np.ndarray | Image.Image,
+        inputs: Union[np.ndarray, Image.Image],
         aligned_size: Tuple[int, int],
         *args,
         **kwargs,
@@ -118,7 +118,7 @@ class OCRResize:
         self.size = size
         self.interpolation = interpolation
 
-    def __call__(self, inputs: np.ndarray | Image.Image, *args, **kwargs) -> np.ndarray:
+    def __call__(self, inputs: Union[np.ndarray, Image.Image], *args, **kwargs) -> np.ndarray:
 
         imgH, imgW = self.size
         h, w, c = inputs.shape
@@ -144,7 +144,7 @@ class PadResize:
 
     def __init__(
         self,
-        size: int | List[int],
+        size: Union[int, List[int]],
         interpolation: InterpolationEnum,
         pad_location: str,
         pad_value: List[int],
@@ -158,7 +158,7 @@ class PadResize:
 
     def __call__(
         self,
-        inputs: np.ndarray | Image.Image,
+        inputs: Union[np.ndarray, Image.Image],
         aligned_size: Tuple[int, int],
         ratios: Tuple[float, float],
         *args,
@@ -319,7 +319,7 @@ class Resize:
 
         return (alingned_height, alingned_width), (height_ratio, width_ratio)
 
-    def __call__(self, inputs: np.ndarray | Image.Image) -> np.ndarray:
+    def __call__(self, inputs: Union[np.ndarray, Image.Image]) -> np.ndarray:
         """Resize the input image to target size."""
         if isinstance(inputs, Image.Image):
             image_size = (inputs.size[1], inputs.size[0])

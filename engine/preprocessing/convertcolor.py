@@ -1,4 +1,5 @@
 from enum import IntEnum, StrEnum
+from typing import Union
 
 import cv2
 import numpy as np
@@ -50,7 +51,7 @@ class ConvertColor:
         if not ColorConvertForm.has_value(form):
             raise ValueError(f"Invalid form. {form}")
 
-    def __call__(self, inputs: np.ndarray | Image.Image) -> np.ndarray:
+    def __call__(self, inputs: Union[np.ndarray, Image.Image]) -> np.ndarray:
         """Convert input image's color space.
 
         Args:

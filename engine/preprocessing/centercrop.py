@@ -1,3 +1,5 @@
+from typing import Union
+
 import numpy as np
 from PIL import Image
 
@@ -14,7 +16,7 @@ class CenterCrop:
         self.height = height
         self.width = width
 
-    def __call__(self, inputs: np.ndarray | Image.Image) -> np.ndarray:
+    def __call__(self, inputs: Union[np.ndarray, Image.Image]) -> np.ndarray:
         """crop the center of input image.
 
         Args:

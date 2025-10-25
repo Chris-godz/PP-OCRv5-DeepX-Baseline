@@ -1,3 +1,5 @@
+from typing import Union
+
 import numpy as np
 
 
@@ -8,7 +10,7 @@ class Div:
         x (float): divisor value.
     """
 
-    def __init__(self, x: float | int) -> None:
+    def __init__(self, x: Union[float, int]) -> None:
         self.x = float(x)
 
     def __call__(self, inputs: np.ndarray) -> np.ndarray:

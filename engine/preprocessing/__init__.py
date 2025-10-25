@@ -1,4 +1,4 @@
-from typing import Callable, Dict, List
+from typing import Callable, Dict, List, Union
 
 import numpy as np
 from torchvision.transforms import Compose
@@ -11,7 +11,7 @@ from preprocessing.normalize import Normalize
 from preprocessing.resize import Resize
 from preprocessing.transpose import Transpose
 
-PREPROCESSING = Dict[str, Dict[str, str | int | float | List[int | float]]]
+PREPROCESSING = Dict[str, Dict[str, Union[str, int, float, List[Union[int, float]]]]]
 
 
 PREPROCESSING_MAP = {
