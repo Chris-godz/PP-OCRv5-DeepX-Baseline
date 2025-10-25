@@ -42,6 +42,9 @@ class DatasetType(str, Enum):
 
 
 class ResizeMode(str, Enum):
+    def _generate_next_value_(name, start, count, last_values):
+        return name
+    
     torchvision = auto()
     default = auto()
     pad = auto()
@@ -54,6 +57,9 @@ class ResizeMode(str, Enum):
 
 
 class ResizeArgEnum(str, Enum):
+    def _generate_next_value_(name, start, count, last_values):
+        return name
+    
     size = auto()
     interpolation = auto()
     backend = auto()
@@ -64,17 +70,26 @@ class ResizeArgEnum(str, Enum):
 
 
 class BackendEnum(str, Enum):
+    def _generate_next_value_(name, start, count, last_values):
+        return name
+    
     cv2 = auto()
     pil = auto()
 
 
 class AlignSideEnum(str, Enum):
+    def _generate_next_value_(name, start, count, last_values):
+        return name
+    
     both = auto()
     long = auto()
     short = auto()
 
 
 class ScaleMethodEnum(str, Enum):
+    def _generate_next_value_(name, start, count, last_values):
+        return name
+    
     scale_up = auto()
     scale_down = auto()
 
